@@ -1,4 +1,6 @@
 ################## UTILITY FUNCTIONS ###########################################
+#Those functions are embedded in workflow functions in the next section
+
 #--- Define custom projection  -------------------------------------------------
 # Define standard two-point equidistance projection for a given bounding box
 #https://gis.stackexchange.com/questions/313721/automatically-get-an-adequate-projection-system-based-on-a-bounding-box
@@ -26,17 +28,17 @@ dist_proj <- function(x) {
 #The option used here relies on terra::nearest, which is faster and returns only 
 # one line for each point compared to sf::st_nearest_points
 snap_sites <- function(in_sites_point, 
-                       in_sitesSQL="", 
+                       in_sitesSQL="", #SQL expression to subset sites to be snapped
                        in_target_path, 
-                       in_targetSQL="",
-                       out_path,
-                       sites_idcol = 'FW_ID',
-                       custom_proj = T, 
-                       attri_to_join = NULL,
-                       write_snapped = F,
+                       in_targetSQL="", #SQL expression to subset objects that sites will be snapped to
+                       sites_idcol = 'FW_ID', 
+                       custom_proj = T, #Whether to first re-project data
+                       attri_to_join = NULL, #Either a single name, a vector of character, or "all"
+                       write_snapped = F, #Whether to write snapped points (out_path)
+                       out_path=NULL,
                        overwrite = F) {
   
-  #Read network
+  #Read target feature class
   target <- terra::vect(in_target_path, query = in_targetSQL)
   
   #Project sites 
@@ -54,7 +56,7 @@ snap_sites <- function(in_sites_point,
     target_proj <- terra::project(target, 
                                   dist_proj(target))
   } else {
-    #if only one site, project to UTM
+    #if only one target object, project to UTM
     target_proj <- terra::project(
       target,
       paste0('+proj=utm +zone=', 
@@ -71,9 +73,10 @@ snap_sites <- function(in_sites_point,
     sitesp <- in_sites_point  
   }
   
+  #Project sites to custom projection
   sitesp_proj <- terra::project(sitesp, crs(target_proj))
   
-  #Snap points (fastest way in R, it seems):
+  #Snap points (fastest custom way in R, it seems):
   #first computing a line between site and snapping place on nearest segment
   sitesnap_l <- terra::nearest(sitesp_proj, target_proj, centroids = F, lines = T)
   values(sitesnap_l) <- values(sitesp_proj)
@@ -83,7 +86,7 @@ snap_sites <- function(in_sites_point,
   sitesnap_p <- terra::as.points(sitesnap_l) %>%
     .[duplicated(values(.)[, sites_idcol]),]
   
-  #Join ID of nearest line to that point
+  #Join attributes of nearest line to that point
   if (!is.null(attri_to_join)) {
     if (attri_to_join == 'all') {
       sitesnap_p[, names(target_proj)] <- terra::nearby(
@@ -107,7 +110,6 @@ snap_sites <- function(in_sites_point,
   
   return(sitesnap_p)
 }
-
 
 
 ################## WORKFLOW FUNCTIONS ##########################################

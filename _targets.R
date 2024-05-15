@@ -1,35 +1,42 @@
 source("src/packages.R")
 source("src/functions.R")
 
-rootdir = getwd()
-datdir = file.path(rootdir, 'data')
-resdir = file.path(rootdir, 'results')
+rootdir = getwd() 
+datdir = file.path(rootdir, 'data') #Directory where sample spreadsheet is and where additional data will be downloaded
+resdir = file.path(rootdir, 'results') #Directory where reproduceable results will be written
 
-global_overwrite = FALSE
+if (!dir.exists(resdir)) {
+  dir.create(resdir)
+}
+
+global_overwrite = FALSE #Global parameter whether to overwrite output files
 
 #--- Data repository for RiverATLAS and LakeATLAS ----
-#URL to HydroATLAS
-riveratlas_url <- "https://figshare.com/ndownloader/files/20087486"
+#URLs to HydroATLAS data
+riveratlas_url <- "https://figshare.com/ndownloader/files/20087486" 
 lakeatlas_url <- "https://figshare.com/ndownloader/files/35959547"
 
-#Directory to download 
+#Directory where HydroATLAS data will be downloaded 
 hydroatlas_dir <- file.path(datdir, "hydroatlas")
 if (!dir.exists(hydroatlas_dir)) {
   dir.create(hydroatlas_dir)
 }
 
-#
+#Freshwater categories in sample spreadsheet
 values <- tibble(
   fw_categories= c("River", "Lake")
 )
 
+#Storage option for target (qs is smaller and faster)
 tar_option_set(error="stop",
                format = "qs")
 
 #--- Define targets plan ------------------------------------------------------
-#Start targets plan on 3 cores - can change number of cores
 #This plan lists all the steps to conduct and their order for the analysis
-#future::plan(future::multisession, workers = 3)
+
+#Start targets plan on 3 cores - can change number of cores
+future::plan(future::multisession, workers = 3)
+
 list(
   #Download RiverATLAS
   tar_target(
@@ -111,11 +118,10 @@ list(
   ,
   
   #Build target for data file path. 
-  #If file path is changed, analysis will be re-run
+  #If file path or the file itself is changed, the analysis will be re-run
   tar_target(
     sites_path,
-    file.path(datdir,
-              "Sample.xlsx"),
+    file.path(datdir, "Sample.xlsx"),
     format = 'file'
   ),
   
@@ -146,6 +152,7 @@ list(
   )
   ,
   
+  #Identify which HydroBASINS level 4 each site is in to subset RiverATLAS data
   tar_target(
     sites_basins_list,
     intersect_sites_basins(in_sites_path = sites_pts_path_River,
@@ -169,6 +176,7 @@ list(
   )
   ,
 
+  #Snap river sites to nearest segment in RiverATLAS and extract associated attributes
   tar_target(
     river_sites_snapped,
     snap_river_sites(
@@ -183,6 +191,7 @@ list(
   )
   ,
 
+  #Snap river sites to nearest segment in LakeATLAS and extract associated attributes
   tar_target(
     lake_sites_snapped,
     snap_lake_sites(
@@ -196,16 +205,15 @@ list(
     )
   ,
   
-  # tar_load(river_sites_snapped)
-  # tar_load(lake_sites_snapped)
-  
+  #Example extraction of raster values (Global Aridity Index version 3)
   tar_target(
     sites_gai,
+    #For both river and lake sites
     lapply(c(river_sites_snapped$geom_path, lake_sites_snapped$geom_path),
            function(pts_path) {
-             pts <- vect(pts_path)
-             pts_extract <- terra::extract(rast(gai_path), pts)
-             pts_extract[, 'FW_ID'] <- values(pts)[, 'FW_ID'] 
+             pts <- vect(pts_path) #read site points
+             pts_extract <- terra::extract(rast(gai_path), pts) #read raster and extract data
+             pts_extract[, 'FW_ID'] <- values(pts)[, 'FW_ID'] #Re-assign unique IDs to table
              
              return(as.data.table(pts_extract[, -1]))
            }
@@ -213,7 +221,8 @@ list(
   )
   ,
   
-  #Write csv table of sites metadata with updated coordinates
+  #Join raster data to HydroATLAS attributes and export to csv tables for 
+  #rivers and lakes, respectively
   tar_target(
     output_sitestab_pathlist,
     {
