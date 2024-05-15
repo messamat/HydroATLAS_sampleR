@@ -187,54 +187,49 @@ create_sitepoints_raw <- function(in_dt, lon_col, lat_col, out_points_path,
 #--- Situate points in basins---------------------------------------------------
 #Identify which HydroBASINS level 4 each site is in and the IDs of all HydroBASINS
 #level 12 in those basins.
-#in_sites_path = tar_read(sites_pts_river_path)
-#in_basins4_pathlist = tar_read(hydrobasins4_pathlist)
-#in_basins12_pathlist = tar_read(hydrobasins12_pathlist)
-
 intersect_sites_basins <- function (in_sites_path,
                                     in_basins4_pathlist,
                                     in_basins12_pathlist) {
   #Import sites as vector
   sitesp <- terra::vect(in_sites_path)
-  
-  #Read HydroBASINS level 4 and get PFAF_ID for each site 
-  #(see technical doc; it's a hierarchical ID system for nested basins)
+
+  #Read HydroBASINS level 4 and get PFAF_ID for each site
+  # (see technical doc; it's a hierarchical ID system for nested basins)
   PFAF_ID_list <- lapply(in_basins4_pathlist, vect) %>%
     vect %>%
     terra::extract(y = sitesp)
   PFAF_ID_list$FW_ID <- sitesp$FW_ID
-  
-  #Create reference of abbreviations in file names associated with continents 
+
+  #Create reference of abbreviations in file names associated with continents
   #(from HydroBASINS technical documentation:
   # https://data.hydrosheds.org/file/technical-documentation/HydroBASINS_TechDoc_v1c.pdf)
   continent_IDs <- data.table(
     continent_digit = seq(1,9),
     continent_name = c('Africa', 'Europe', 'Siberia', 'Asia', 'Australia',
-                       'South America', 'North America (excluding Arctic)', 
+                       'South America', 'North America (excluding Arctic)',
                        'Arctic (North America)', 'Greenland'),
     continent_abbr = c('af', 'eu', 'si', 'as', 'au', 'sa', 'na', 'ar', 'gr')
   )
-  
+
   #Identify all HydroBASINS level 12 (the finest level) in hydroBASINS level 4
-  #where sites are located. This intermediate step is necessary because 
+  #where sites are located. This intermediate step is necessary because
   #RiverATLAS is associated only with HydroBASINS level 12
   basins12_intersecting_IDs <- lapply(in_basins12_pathlist, function(in_path) {
     read.dbf(gsub("[.]shp$", ".dbf", in_path)) %>% #Import attribute data (.dbf file)
       setDT %>% #Convert it to a data.table object for fast data manipulation
-      .[, `:=`(  
+      .[, `:=`(
         PFAF_ID4 = PFAF_ID %/% 10^8, #Get PFAF_ID of basin level 4 of which it is part
         continent_digit = HYBAS_ID%/%10^9 #Get digit ID corresponding to the continent where it is located
       )] %>%
       merge(PFAF_ID_list[, c('SORT', 'PFAF_ID')], #Associate with sites
-            by.x='PFAF_ID4', by.y='PFAF_ID', 
+            by.x='PFAF_ID4', by.y='PFAF_ID',
             all.x=F, all.y=F) %>%
-      .[, c('PFAF_ID4', 'HYBAS_ID', 'continent_digit'), with=F] 
-  }) %>% 
+      .[, c('PFAF_ID4', 'HYBAS_ID', 'continent_digit'), with=F]
+  }) %>%
     rbindlist %>% #Merge data for all continents
     merge(continent_IDs, by='continent_digit') # Get ancillary data on continent names and abbreviations
-  
-  
-  return(list(basin_ids = basins12_intersecting_IDs,
+
+  return(list(basin_ids = as.data.frame(basins12_intersecting_IDs), #Output as dataframe rather than data table because of targets bug
               pfafid4 = PFAF_ID_list[, c('FW_ID', 'PFAF_ID')])
   )
 }
@@ -246,6 +241,8 @@ subset_riveratlas <- function(in_basins_list,
                               in_riveratlas_pathlist,
                               out_gpkg_path,
                               overwrite=F) {
+  
+  setDT(in_basins_list)
   
   #Get list of continents where there are sites
   continent_list <- in_basins_list[, unique(continent_abbr)]
@@ -290,7 +287,7 @@ subset_riveratlas <- function(in_basins_list,
     terra::writeVector(net_sub_geom, out_gpkg_path, overwrite=T)
   } 
   
-  return(list(attri_dt =  net_sub_attri, #Attribute table in data.table (dt) format
+  return(list(attri_df =  as.data.frame(net_sub_attri), #Attribute table
               geom_path = out_gpkg_path) #Path to geopackage containing segments in basins where there are sites
   )
 }
@@ -333,7 +330,7 @@ snap_river_sites <- function(in_sites_path,
     
     #Get RiverATLAS attributes for segments that sites where snapped to
     sites_snapped_attri <- merge(sites_snapped, 
-                                 in_riveratlas_sub$attri_dt, 
+                                 in_riveratlas_sub$attri_df, 
                                  by='HYRIV_ID')
     
     #Write resulting dataset
@@ -344,7 +341,7 @@ snap_river_sites <- function(in_sites_path,
   }
   
   return(list(
-    attri_dt = as.data.table(values(sites_snapped_attri)), #Attribute table in data.table (dt) format
+    attri_df = values(sites_snapped_attri), #Attribute table 
     geom_path = out_snapped_sites_path #Path to geopackage containing site points with attribute data
   ))
 }
@@ -389,7 +386,7 @@ snap_lake_sites <- function(in_sites_path,
   }
   
   return(list(
-    attri_dt = as.data.table(values(sites_snapped_nodupli)), #Attribute table in data.table (dt) format
+    attri_df = values(sites_snapped_nodupli), #Attribute table
     geom_path = out_snapped_sites_path #Path to geopackage containing site points with attribute data
   ))
 }

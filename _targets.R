@@ -130,7 +130,7 @@ list(
       create_sitepoints_raw(
             lon_col = 'Longitude',
             lat_col = 'Latitude',
-            out_points_path = file.path(resdir, 'sites_points_river.shp'),
+            out_points_path = file.path(resdir, 'sites_points_river.gpkg'),
             columns_to_include = c("FW_ID", "Ecosystem", "Country_ISO", "Country",
                                    "Site_name")
           )
@@ -144,7 +144,7 @@ list(
       create_sitepoints_raw(
         lon_col = 'Longitude',
         lat_col = 'Latitude',
-        out_points_path = file.path(resdir, 'sites_points_lake.shp'),
+        out_points_path = file.path(resdir, 'sites_points_lake.gpkg'),
         columns_to_include = c("FW_ID", "Ecosystem", "Country_ISO", "Country",
                                "Site_name")
       )
@@ -217,7 +217,8 @@ list(
 
              return(as.data.table(pts_extract[, -1]))
            }
-    ) %>% rbindlist
+    ) %>% rbindlist %>%
+      as.data.frame
   )
   ,
 
@@ -228,13 +229,13 @@ list(
     {
       river_attri_tab <- file.path(resdir, 'river_samples_attri.csv')
       if (!file.exists(river_attri_tab) | global_overwrite) {
-        merge(river_sites_snapped$attri_dt, sites_gai, by='FW_ID') %>%
+        merge(river_sites_snapped$attri_df, sites_gai, by='FW_ID') %>%
           fwrite(river_attri_tab)
       }
 
       lake_attri_tab <- file.path(resdir, 'lake_samples_attri.csv')
       if (!file.exists(lake_attri_tab) | global_overwrite) {
-        merge(lake_sites_snapped$attri_dt, sites_gai, by='FW_ID') %>%
+        merge(lake_sites_snapped$attri_df, sites_gai, by='FW_ID') %>%
           fwrite(lake_attri_tab)
       }
 

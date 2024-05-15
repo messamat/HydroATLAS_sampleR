@@ -1,3 +1,4 @@
+library(terra)
 library(data.table)
 library(foreign)
 library(httr2)
@@ -6,5 +7,4 @@ library(readxl)
 library(sf)
 library(tarchetypes)
 library(targets)
-library(tibble)
-library(terra)
+
