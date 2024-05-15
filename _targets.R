@@ -22,20 +22,12 @@ if (!dir.exists(hydroatlas_dir)) {
   dir.create(hydroatlas_dir)
 }
 
-#Freshwater categories in sample spreadsheet
-values <- tibble(
-  fw_categories= c("River", "Lake")
-)
-
 #Storage option for target (qs is smaller and faster)
 tar_option_set(error="stop",
                format = "qs")
 
 #--- Define targets plan ------------------------------------------------------
 #This plan lists all the steps to conduct and their order for the analysis
-
-#Start targets plan on 3 cores - can change number of cores
-future::plan(future::multisession, workers = 3)
 
 list(
   #Download RiverATLAS
@@ -69,8 +61,9 @@ list(
           quiet=F) 
       }) %>% unlist,
     format = "file"
-  ),
-  
+  )
+  ,
+
   #Download HydroBASINS level 12
   tar_target(
     hydrobasins12_pathlist,
@@ -78,14 +71,15 @@ list(
       c('af', 'ar', 'as', 'au','eu', 'gr', 'na', 'sa', 'si'), function(continent) {
         download_hydroatlas_shp(
           in_url = paste0("https://data.hydrosheds.org/file/HydroBASINS/standard/hybas_",
-                          continent, "_lev12_v1c.zip"), 
+                          continent, "_lev12_v1c.zip"),
           in_dirpath = file.path(hydroatlas_dir, 'hydrobasins'),
-          quiet=F) 
+          quiet=F)
       }) %>% unlist,
     format = "file"
-  ),
-  
-  #Download version 3 of Global Aridity Index
+  )
+  ,
+
+  #Download version 3 of Global Aridity Index (example raster to extract values from)
   tar_target(
     gai_path,
     {
@@ -93,74 +87,80 @@ list(
       if (!dir.exists(gaidir)) {
         dir.create(gaidir)
       }
-      
-      gai_url <- "https://figshare.com/ndownloader/files/34377245" 
+
+      gai_url <- "https://figshare.com/ndownloader/files/34377245"
       gai_zip <- file.path(gaidir, 'Global-AI_ET0_annual_v3.zip')
-      
+
       if (!file.exists(gai_zip)) {
         options(timeout=1000)
         download.file(url = gai_url,
-                      destfile = gai_zip)
-      } 
-      
-      gai_annual_path <- file.path(gaidir, 
-                                   'Global-AI_ET0_v3_annual', 
+                      destfile = gai_zip,
+                      mode = "wb")
+      }
+
+      gai_annual_path <- file.path(gaidir,
+                                   'Global-AI_ET0_v3_annual',
                                    'ai_v3_yr.tif')
       if (!file.exists(gai_annual_path)) {
         tryCatch(utils::unzip(zipfile = gai_zip,
                               exdir = gaidir),
                  warning= function(w) rlang::abort(conditionMessage(w)))
       }
-      
+
       return(gai_annual_path)
     }
   )
   ,
-  
-  #Build target for data file path. 
+
+  #Build target for data file path.
   #If file path or the file itself is changed, the analysis will be re-run
   tar_target(
     sites_path,
     file.path(datdir, "Sample.xlsx"),
     format = 'file'
-  ),
-  
+  )
+  ,
+
   #Read data files
   #If content changes, analysis will be re-run
-  tar_map(
-    values = values,
-    tar_target(
-      sites_raw,
-      readxl::read_xlsx(sites_path, sheet= paste(fw_categories, "sample")) %>%
-        setDT
-    ),
-    
-    #Create point layer using sites' raw coordinates
-    tar_target(
-      sites_pts_path,
+  tar_target(
+    sites_pts_river_path,
+    read_xlsx(sites_path, sheet="River sample") %>%
+      setDT %>%
       create_sitepoints_raw(
-        in_dt = sites_raw,
-        lon_col = 'Longitude',
-        lat_col = 'Latitude',
-        out_points_path = file.path(resdir, 
-                                    paste0('sites_points', fw_categories, '.shp')),
-        columns_to_include = c("FW_ID", "Ecosystem", "Country_ISO", "Country",
-                               "Site_name")
-      ),
-      format = 'file'
-    )
+            lon_col = 'Longitude',
+            lat_col = 'Latitude',
+            out_points_path = file.path(resdir, 'sites_points_river.shp'),
+            columns_to_include = c("FW_ID", "Ecosystem", "Country_ISO", "Country",
+                                   "Site_name")
+          )
   )
   ,
   
+  tar_target(
+    sites_pts_lake_path,
+    read_xlsx(sites_path, sheet="Lake sample") %>%
+      setDT %>%
+      create_sitepoints_raw(
+        lon_col = 'Longitude',
+        lat_col = 'Latitude',
+        out_points_path = file.path(resdir, 'sites_points_lake.shp'),
+        columns_to_include = c("FW_ID", "Ecosystem", "Country_ISO", "Country",
+                               "Site_name")
+      )
+  )
+  ,
+
+
   #Identify which HydroBASINS level 4 each site is in to subset RiverATLAS data
   tar_target(
     sites_basins_list,
-    intersect_sites_basins(in_sites_path = sites_pts_path_River,
+    intersect_sites_basins(in_sites_path = sites_pts_river_path,
                            in_basins4_pathlist = hydrobasins4_pathlist,
                            in_basins12_pathlist = hydrobasins12_pathlist)
   )
   ,
-  
+
   #Subset river segments to keep only those in basins with sites
   tar_target(
     riveratlas_sub,
@@ -172,7 +172,7 @@ list(
                                        format(Sys.Date(), '%Y%m%d'),
                                        '.gpkg')),
       overwrite = global_overwrite
-    ) 
+    )
   )
   ,
 
@@ -180,7 +180,7 @@ list(
   tar_target(
     river_sites_snapped,
     snap_river_sites(
-      in_sites_path = sites_pts_path_River,
+      in_sites_path = sites_pts_river_path,
       in_sites_pfafid = sites_basins_list$pfafid4,
       in_riveratlas_sub = riveratlas_sub,
       out_snapped_sites_path = file.path(resdir,
@@ -195,7 +195,7 @@ list(
   tar_target(
     lake_sites_snapped,
     snap_lake_sites(
-      in_sites_path = sites_pts_path_Lake,
+      in_sites_path = sites_pts_lake_path,
       in_lakeatlas_pathlist = lakeatlas_pathlist,
       out_snapped_sites_path = file.path(resdir,
                                          paste0('lake_samples_snapped',
@@ -204,7 +204,7 @@ list(
       overwrite = global_overwrite)
     )
   ,
-  
+
   #Example extraction of raster values (Global Aridity Index version 3)
   tar_target(
     sites_gai,
@@ -214,14 +214,14 @@ list(
              pts <- vect(pts_path) #read site points
              pts_extract <- terra::extract(rast(gai_path), pts) #read raster and extract data
              pts_extract[, 'FW_ID'] <- values(pts)[, 'FW_ID'] #Re-assign unique IDs to table
-             
+
              return(as.data.table(pts_extract[, -1]))
            }
     ) %>% rbindlist
   )
   ,
-  
-  #Join raster data to HydroATLAS attributes and export to csv tables for 
+
+  #Join raster data to HydroATLAS attributes and export to csv tables for
   #rivers and lakes, respectively
   tar_target(
     output_sitestab_pathlist,
@@ -237,7 +237,7 @@ list(
         merge(lake_sites_snapped$attri_dt, sites_gai, by='FW_ID') %>%
           fwrite(lake_attri_tab)
       }
-      
+
       return(c(river_attri_tab, lake_attri_tab))
     },
     format='file'

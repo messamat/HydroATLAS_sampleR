@@ -1,6 +1,7 @@
 library(data.table)
 library(foreign)
 library(httr2)
+library(qs)
 library(readxl)
 library(sf)
 library(tarchetypes)

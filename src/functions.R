@@ -88,9 +88,9 @@ snap_sites <- function(in_sites_point,
   
   #Join attributes of nearest line to that point
   if (!is.null(attri_to_join)) {
-    if (attri_to_join == 'all') {
+    if (attri_to_join == 'all') { 
       sitesnap_p[, names(target_proj)] <- terra::nearby(
-        sitesnap_p, target_proj, k=1)[,'k1'] %>%
+        sitesnap_p, target_proj, k=1)[,'k1'] %>% #Could grab the nth nearest or place a distance limit
         as.data.frame(target_proj)[.,] 
     } else {
       sitesnap_p[, attri_to_join] <- terra::nearby(
@@ -154,6 +154,7 @@ download_hydroatlas_shp <- function(in_url,
         ),]
   }
   
+  #Unzip data (not those files already present)
   if (nrow(files_to_unzip) > 0L) {
     tryCatch(utils::unzip(zipfile = shp_zip_path, 
                           files = files_to_unzip$Name,
@@ -162,7 +163,7 @@ download_hydroatlas_shp <- function(in_url,
              warning= function(w) rlang::abort(conditionMessage(w)))
   }
   
-  #Mosaic tiles
+  #Get list of unzipped files
   shplist <- file.path(
     shp_unzip_path,
     list.files(shp_unzip_path, pattern = '.*[.]shp$', recursive=T)
@@ -184,9 +185,11 @@ create_sitepoints_raw <- function(in_dt, lon_col, lat_col, out_points_path,
 }
 
 #--- Situate points in basins---------------------------------------------------
-# in_sites_path = tar_read(sites_pts_path_River)
-# in_basins4_pathlist = tar_read(hydrobasins4_pathlist)
-# in_basins12_pathlist = tar_read(hydrobasins12_pathlist)
+#Identify which HydroBASINS level 4 each site is in and the IDs of all HydroBASINS
+#level 12 in those basins.
+#in_sites_path = tar_read(sites_pts_river_path)
+#in_basins4_pathlist = tar_read(hydrobasins4_pathlist)
+#in_basins12_pathlist = tar_read(hydrobasins12_pathlist)
 
 intersect_sites_basins <- function (in_sites_path,
                                     in_basins4_pathlist,
@@ -194,13 +197,14 @@ intersect_sites_basins <- function (in_sites_path,
   #Import sites as vector
   sitesp <- terra::vect(in_sites_path)
   
-  #Read HydroBASINS level 4 and get PFAF_ID
+  #Read HydroBASINS level 4 and get PFAF_ID for each site 
+  #(see technical doc; it's a hierarchical ID system for nested basins)
   PFAF_ID_list <- lapply(in_basins4_pathlist, vect) %>%
     vect %>%
     terra::extract(y = sitesp)
   PFAF_ID_list$FW_ID <- sitesp$FW_ID
   
-  #Create reference of IDs associated with continents 
+  #Create reference of abbreviations in file names associated with continents 
   #(from HydroBASINS technical documentation:
   # https://data.hydrosheds.org/file/technical-documentation/HydroBASINS_TechDoc_v1c.pdf)
   continent_IDs <- data.table(
@@ -211,20 +215,23 @@ intersect_sites_basins <- function (in_sites_path,
     continent_abbr = c('af', 'eu', 'si', 'as', 'au', 'sa', 'na', 'ar', 'gr')
   )
   
+  #Identify all HydroBASINS level 12 (the finest level) in hydroBASINS level 4
+  #where sites are located. This intermediate step is necessary because 
+  #RiverATLAS is associated only with HydroBASINS level 12
   basins12_intersecting_IDs <- lapply(in_basins12_pathlist, function(in_path) {
-    read.dbf(gsub("[.]shp$", ".dbf", in_path)) %>%
-      setDT %>%
-      .[, `:=`(
-        PFAF_ID4 = PFAF_ID %/% 10^8,
-        continent_digit = HYBAS_ID%/%10^9
+    read.dbf(gsub("[.]shp$", ".dbf", in_path)) %>% #Import attribute data (.dbf file)
+      setDT %>% #Convert it to a data.table object for fast data manipulation
+      .[, `:=`(  
+        PFAF_ID4 = PFAF_ID %/% 10^8, #Get PFAF_ID of basin level 4 of which it is part
+        continent_digit = HYBAS_ID%/%10^9 #Get digit ID corresponding to the continent where it is located
       )] %>%
-      merge(PFAF_ID_list[, c('SORT', 'PFAF_ID')], 
+      merge(PFAF_ID_list[, c('SORT', 'PFAF_ID')], #Associate with sites
             by.x='PFAF_ID4', by.y='PFAF_ID', 
             all.x=F, all.y=F) %>%
       .[, c('PFAF_ID4', 'HYBAS_ID', 'continent_digit'), with=F] 
   }) %>% 
-    rbindlist %>%
-    merge(continent_IDs, by='continent_digit')
+    rbindlist %>% #Merge data for all continents
+    merge(continent_IDs, by='continent_digit') # Get ancillary data on continent names and abbreviations
   
   
   return(list(basin_ids = basins12_intersecting_IDs,
@@ -233,72 +240,62 @@ intersect_sites_basins <- function (in_sites_path,
 }
 
 #--- Read network from basins --------------------------------------------------
-# in_basins_list = tar_read(sites_basins_list)$basin_ids
-# in_riveratlas_pathlist <- tar_read(riveratlas_pathlist)
-# out_gpkg_path <- file.path(resdir,
-#                            paste0('netsub_',
-#                                   format(Sys.Date(), '%Y%m%d'),
-#                                   '.gpkg')
-# )
-
+#Subset RiverATLAS to only include segments within the HydroBASINS level 4
+#where sites are located.
 subset_riveratlas <- function(in_basins_list,
                               in_riveratlas_pathlist,
                               out_gpkg_path,
                               overwrite=F) {
+  
+  #Get list of continents where there are sites
   continent_list <- in_basins_list[, unique(continent_abbr)]
   
+  #For each continent
   net_sub_attri <- lapply(continent_list, function(cont) {
     print(cont)
     basins_sub <- in_basins_list[continent_abbr == cont,]
-    net_path <- grep(paste0('RiverATLAS_v10_', cont, '[a-z_]*[.]shp$'),
+    net_path <- grep(paste0('RiverATLAS_v10_', cont, '[a-z_]*[.]shp$'), #Get RiverATLAS file path
                      in_riveratlas_pathlist,
                      value=T)
-    #Read dbf
+    #Read RiverATLAS attributes (dbf file associated with shapefile)
     riveratlas_attri_sub <- read.dbf(gsub("[.]shp$", ".dbf", net_path)) %>%
-      setDT %>%
-      .[HYBAS_L12 %in% basins_sub$HYBAS_ID,] %>%
+      setDT %>% #Convert to data.table format for fast manipulation
+      .[HYBAS_L12 %in% basins_sub$HYBAS_ID,] %>% #Only keep segment attributes in basins where there are sites
       .[, continent_abbr := cont]
     
     return(riveratlas_attri_sub)
   }) %>% rbindlist
   
-  if (!file.exists(out_gpkg_path) | overwrite) {
-    net_sub_geom <- lapply(continent_list, function(cont) {
+  if (!file.exists(out_gpkg_path) | overwrite) { #If output file doesn't already exist or overwrite==TRUE
+    net_sub_geom <- lapply(continent_list, function(cont) { #For each continent
       net_path <- grep(paste0('RiverATLAS_v10_', cont, '[a-z_]*[.]shp$'),
                        in_riveratlas_pathlist,
                        value=T)
       net_lyr_name <- tools::file_path_sans_ext(basename(net_path))
       
-      #Create intervals of IDs to select at a time through SQL query
+      #Only read geometry data and ID column
       net_sub_cont <- terra::vect(net_path, 
                                   query=paste("SELECT HYRIV_ID FROM",
                                               net_lyr_name))
       
+      #Only keep segment geometries in basins where there are sites
       return(merge(net_sub_cont, 
                    net_sub_attri[continent_abbr == cont,.(HYRIV_ID, HYBAS_L12)],
                    by='HYRIV_ID', all.x=F)
       )
     }) %>%
-      vect(.) %>%
-      merge(in_basins_list, by.x='HYBAS_L12', by.y='HYBAS_ID')
+      vect(.) %>% #Merge data for all continents
+      merge(in_basins_list, by.x='HYBAS_L12', by.y='HYBAS_ID') #Join basin IDs
     
     terra::writeVector(net_sub_geom, out_gpkg_path, overwrite=T)
   } 
   
-  return(list(attri_dt =  net_sub_attri,
-              geom_path = out_gpkg_path)
+  return(list(attri_dt =  net_sub_attri, #Attribute table in data.table (dt) format
+              geom_path = out_gpkg_path) #Path to geopackage containing segments in basins where there are sites
   )
 }
 
-#--- Snap sites to nearest segment ---------------------------------------------
-# in_sites_path = tar_read(sites_pts_path_River)
-# in_riveratlas_sub = tar_read(riveratlas_sub)
-# out_snapped_sites_path = file.path(resdir,
-#                                    paste0('river_samples_snapped',
-#                                           format(Sys.Date(), '%Y%m%d'),
-#                                           '.gpkg'))
-# in_sites_pfafid = tar_read(sites_basins_list)$pfafid4
-
+#--- Snap sites to nearest segment and get attributes --------------------------
 snap_river_sites <- function(in_sites_path, 
                              in_sites_pfafid,
                              in_riveratlas_sub,
@@ -311,16 +308,17 @@ snap_river_sites <- function(in_sites_path,
       merge(in_sites_pfafid, by.x='FW_ID', by.y='FW_ID')
     
     sites_snapped <- lapply(unique(sites$PFAF_ID), function(in_pfafid) {
-      #subset sites
+      #Subset sites
       sites_sub <- sites[sites$PFAF_ID == in_pfafid,]
       
-      #expression to subset network
+      #Expression to subset network (only in basin where there is a site)
       SQLquery_net <- paste0(
         "SELECT * FROM ",
         tools::file_path_sans_ext(basename(in_riveratlas_sub$geom_path)),
         " WHERE PFAF_ID4 =", 
         in_pfafid)
       
+      #Snap sites to nearest segment in RiverATLAS and get initial distance to that segment
       sites_snapped_sub <- snap_sites(in_sites_point = sites_sub, 
                                       in_target_path = in_riveratlas_sub$geom_path,
                                       in_targetSQL= SQLquery_net,
@@ -331,12 +329,14 @@ snap_river_sites <- function(in_sites_path,
       
       return(sites_snapped_sub)
     }) %>%
-      vect(.)
+      vect(.) #Merge snapped sites from all basins
     
+    #Get RiverATLAS attributes for segments that sites where snapped to
     sites_snapped_attri <- merge(sites_snapped, 
                                  in_riveratlas_sub$attri_dt, 
                                  by='HYRIV_ID')
     
+    #Write resulting dataset
     terra::writeVector(sites_snapped_attri, out_snapped_sites_path, 
                        overwrite = overwrite)
   } else{
@@ -344,20 +344,13 @@ snap_river_sites <- function(in_sites_path,
   }
   
   return(list(
-    attri_dt = as.data.table(values(sites_snapped_attri)),
-    geom_path = out_snapped_sites_path
+    attri_dt = as.data.table(values(sites_snapped_attri)), #Attribute table in data.table (dt) format
+    geom_path = out_snapped_sites_path #Path to geopackage containing site points with attribute data
   ))
 }
 
 
 #--- Snap sites to nearest lake ------------------------------------------------
-# in_sites_path = tar_read(sites_pts_path_Lake)
-# in_lakeatlas_pathlist = tar_read(lakeatlas_pathlist)
-# out_snapped_sites_path = file.path(resdir,
-#                                    paste0('lake_samples_snapped',
-#                                           format(Sys.Date(), '%Y%m%d'),
-#                                           '.gpkg'))
-
 snap_lake_sites <- function(in_sites_path, 
                             in_lakeatlas_pathlist,
                             out_snapped_sites_path, 
@@ -367,8 +360,11 @@ snap_lake_sites <- function(in_sites_path,
     #Iterate over every basin where there is a site
     sites <- vect(in_sites_path) 
     
+    #LakeATLAS is divided in two zones (east and west), so iterate over these
     sites_snapped <- lapply(in_lakeatlas_pathlist, function(in_lakeatlas_path) {
       print(in_lakeatlas_path)
+      #Snap sites to nearest lake, get initial distance to that lake
+      #and join all attributes from that lake
       sites_snapped_sub <- snap_sites(in_sites_point = sites, 
                                       in_target_path = in_lakeatlas_path,
                                       sites_idcol = 'FW_ID',
@@ -378,8 +374,11 @@ snap_lake_sites <- function(in_sites_path,
       
       return(sites_snapped_sub)
     }) %>%
-      vect(.) 
+      vect(.) #Merge snapped sites from eastern and western portions of LakeATLAS
     
+    #Only keep unique site-lake pairs for matching LakeATLAS portions
+    #(i.e., sites in western portion where matched to very distance lakes in 
+    #eastern portion, and vice versa, during the process so all sites are duplicated)
     sites_snapped_nodupli <- sites_snapped[order(sites_snapped$snap_dist_m),] %>%
       .[!duplicated(.$'FW_ID'),] 
     
@@ -390,7 +389,7 @@ snap_lake_sites <- function(in_sites_path,
   }
   
   return(list(
-    attri_dt = as.data.table(values(sites_snapped_nodupli)),
-    geom_path = out_snapped_sites_path
+    attri_dt = as.data.table(values(sites_snapped_nodupli)), #Attribute table in data.table (dt) format
+    geom_path = out_snapped_sites_path #Path to geopackage containing site points with attribute data
   ))
 }
