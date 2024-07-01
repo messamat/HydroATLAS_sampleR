@@ -9,7 +9,7 @@ if (!dir.exists(resdir)) {
   dir.create(resdir)
 }
 
-global_overwrite = FALSE #Global parameter whether to overwrite output files
+global_overwrite = TRUE #Global parameter whether to overwrite output files
 
 #--- Data repository for RiverATLAS and LakeATLAS ----
 #URLs to HydroATLAS data
@@ -130,7 +130,11 @@ list(
       create_sitepoints_raw(
             lon_col = 'Longitude',
             lat_col = 'Latitude',
-            out_points_path = file.path(resdir, 'sites_points_river.gpkg'),
+            out_points_path = file.path(resdir, 
+                                        paste0('sites_points_river',
+                                               format(Sys.Date(), "%Y%m%d"),
+                                               ".gpkg")
+                                        ),
             columns_to_include = c("FW_ID", "Ecosystem", "Country_ISO", "Country",
                                    "Site_name")
           )
@@ -144,7 +148,11 @@ list(
       create_sitepoints_raw(
         lon_col = 'Longitude',
         lat_col = 'Latitude',
-        out_points_path = file.path(resdir, 'sites_points_lake.gpkg'),
+        out_points_path = file.path(resdir, 
+                                    paste0('sites_points_lake',
+                                           format(Sys.Date(), "%Y%m%d"),
+                                           ".gpkg")
+        ),
         columns_to_include = c("FW_ID", "Ecosystem", "Country_ISO", "Country",
                                "Site_name")
       )
@@ -191,7 +199,7 @@ list(
   )
   ,
 
-  #Snap river sites to nearest segment in LakeATLAS and extract associated attributes
+  # #Snap river sites to nearest segment in LakeATLAS and extract associated attributes
   tar_target(
     lake_sites_snapped,
     snap_lake_sites(
@@ -227,13 +235,19 @@ list(
   tar_target(
     output_sitestab_pathlist,
     {
-      river_attri_tab <- file.path(resdir, 'river_samples_attri.csv')
+      river_attri_tab <- file.path(resdir, 
+                                   paste0('river_samples_attri',
+                                          format(Sys.Date(), '%Y%m%d'),
+                                          '.csv'))
       if (!file.exists(river_attri_tab) | global_overwrite) {
         merge(river_sites_snapped$attri_df, sites_gai, by='FW_ID') %>%
           fwrite(river_attri_tab)
       }
 
-      lake_attri_tab <- file.path(resdir, 'lake_samples_attri.csv')
+      lake_attri_tab <- file.path(resdir, 
+                                  paste0('lake_samples_attri',
+                                         format(Sys.Date(), '%Y%m%d'),
+                                         '.csv'))
       if (!file.exists(lake_attri_tab) | global_overwrite) {
         merge(lake_sites_snapped$attri_df, sites_gai, by='FW_ID') %>%
           fwrite(lake_attri_tab)

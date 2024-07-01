@@ -221,7 +221,8 @@ intersect_sites_basins <- function (in_sites_path,
         PFAF_ID4 = PFAF_ID %/% 10^8, #Get PFAF_ID of basin level 4 of which it is part
         continent_digit = HYBAS_ID%/%10^9 #Get digit ID corresponding to the continent where it is located
       )] %>%
-      merge(PFAF_ID_list[, c('SORT', 'PFAF_ID')], #Associate with sites
+      merge(PFAF_ID_list[!is.na(PFAF_ID_list$HYBAS_ID) & !duplicated(PFAF_ID_list$HYBAS_ID), 
+                         c('SORT', 'PFAF_ID')], #Associate with sites
             by.x='PFAF_ID4', by.y='PFAF_ID',
             all.x=F, all.y=F) %>%
       .[, c('PFAF_ID4', 'HYBAS_ID', 'continent_digit'), with=F]
@@ -254,26 +255,46 @@ subset_riveratlas <- function(in_basins_list,
     net_path <- grep(paste0('RiverATLAS_v10_', cont, '[a-z_]*[.]shp$'), #Get RiverATLAS file path
                      in_riveratlas_pathlist,
                      value=T)
+    
     #Read RiverATLAS attributes (dbf file associated with shapefile)
-    riveratlas_attri_sub <- read.dbf(gsub("[.]shp$", ".dbf", net_path)) %>%
-      setDT %>% #Convert to data.table format for fast manipulation
-      .[HYBAS_L12 %in% basins_sub$HYBAS_ID,] %>% #Only keep segment attributes in basins where there are sites
-      .[, continent_abbr := cont]
+    if (length(net_path) > 1) {
+      riveratlas_attri_sub <- lapply(net_path, function(in_path) {
+        read.dbf(gsub("[.]shp$", ".dbf", in_path)) %>%
+          setDT %>% #Convert to data.table format for fast manipulation
+          .[HYBAS_L12 %in% basins_sub$HYBAS_ID,] %>% #Only keep segment attributes in basins where there are sites
+          .[, continent_abbr := cont]
+      }) %>% rbindlist
+    } else {
+      riveratlas_attri_sub <- read.dbf(gsub("[.]shp$", ".dbf", net_path)) %>%
+        setDT %>% #Convert to data.table format for fast manipulation
+        .[HYBAS_L12 %in% basins_sub$HYBAS_ID,] %>% #Only keep segment attributes in basins where there are sites
+        .[, continent_abbr := cont]
+    }
     
     return(riveratlas_attri_sub)
   }) %>% rbindlist
   
   if (!file.exists(out_gpkg_path) | overwrite) { #If output file doesn't already exist or overwrite==TRUE
     net_sub_geom <- lapply(continent_list, function(cont) { #For each continent
+      print(cont)
       net_path <- grep(paste0('RiverATLAS_v10_', cont, '[a-z_]*[.]shp$'),
                        in_riveratlas_pathlist,
                        value=T)
-      net_lyr_name <- tools::file_path_sans_ext(basename(net_path))
-      
+
       #Only read geometry data and ID column
-      net_sub_cont <- terra::vect(net_path, 
-                                  query=paste("SELECT HYRIV_ID FROM",
-                                              net_lyr_name))
+      if (length(net_path) > 1) {
+        net_sub_cont <- lapply(net_path, function(in_path) {
+          net_lyr_name <- tools::file_path_sans_ext(basename(in_path))
+          terra::vect(in_path, 
+                      query=paste("SELECT HYRIV_ID FROM",
+                                  net_lyr_name))
+        }) %>% vect
+      } else {
+        net_lyr_name <- tools::file_path_sans_ext(basename(net_path))
+        net_sub_cont <- terra::vect(net_path, 
+                                    query=paste("SELECT HYRIV_ID FROM",
+                                                net_lyr_name))
+      }
       
       #Only keep segment geometries in basins where there are sites
       return(merge(net_sub_cont, 
@@ -304,7 +325,8 @@ snap_river_sites <- function(in_sites_path,
     sites <- vect(in_sites_path) %>%
       merge(in_sites_pfafid, by.x='FW_ID', by.y='FW_ID')
     
-    sites_snapped <- lapply(unique(sites$PFAF_ID), function(in_pfafid) {
+    sites_snapped <- lapply(unique(sites[!is.na(sites$PFAF_ID),]$PFAF_ID), 
+                            function(in_pfafid) {
       #Subset sites
       sites_sub <- sites[sites$PFAF_ID == in_pfafid,]
       
