@@ -50,20 +50,24 @@ snap_sites <- function(in_sites_point,
   # Consequently, for each basin, the sites are projected using a custom 
   # projection which minimizes distortions for distance calculations within the
   # network bounding box.
-  if (nrow(target) > 1 & ((xmax(target) != xmin(target)) | 
-                          (ymax(target) != ymin(target)))
-  ){
-    target_proj <- terra::project(target, 
-                                  dist_proj(target))
+  if (custom_proj) {
+    if (nrow(target) > 1 & ((xmax(target) != xmin(target)) | 
+                            (ymax(target) != ymin(target)))
+    ){
+      target_proj <- terra::project(target, 
+                                    dist_proj(target))
+    } else {
+      #if only one target object, project to UTM
+      target_proj <- terra::project(
+        target,
+        paste0('+proj=utm +zone=', 
+               floor((xmin(target) + 180) / 6) + 1,
+               ' +datum=WGS84 +units=m +no_defs +ellps=WGS84')
+      )
+    } 
   } else {
-    #if only one target object, project to UTM
-    target_proj <- terra::project(
-      target,
-      paste0('+proj=utm +zone=', 
-             floor((xmin(target) + 180) / 6) + 1,
-             ' +datum=WGS84 +units=m +no_defs +ellps=WGS84')
-    )
   }
+
   remove(target)
   
   #Read sites
@@ -90,11 +94,11 @@ snap_sites <- function(in_sites_point,
   if (!is.null(attri_to_join)) {
     if (attri_to_join == 'all') { 
       sitesnap_p[, names(target_proj)] <- terra::nearby(
-        sitesnap_p, target_proj, k=1)[,'k1'] %>% #Could grab the nth nearest or place a distance limit
+        sitesnap_p, target_proj, k=1, centroids=FALSE)[,'k1'] %>% #Could grab the nth nearest or place a distance limit
         as.data.frame(target_proj)[.,] 
     } else {
       sitesnap_p[, attri_to_join] <- terra::nearby(
-        sitesnap_p, target_proj, k=1)[,'k1'] %>%
+        sitesnap_p, target_proj, k=1, centroids=FALSE)[,'k1'] %>%
         as.data.frame(target_proj)[., attri_to_join] 
     }
   }
