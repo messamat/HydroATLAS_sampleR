@@ -132,7 +132,7 @@ list(
             lat_col = 'Latitude',
             out_points_path = file.path(resdir, 
                                         paste0('sites_points_river',
-                                               format(Sys.Date(), "%Y%m%d"),
+                                               format(Sys.time(), "%Y%m%d%H%M"),
                                                ".gpkg")
                                         ),
             columns_to_include = c("FW_ID", "Ecosystem", "Country_ISO", "Country",
@@ -150,7 +150,7 @@ list(
         lat_col = 'Latitude',
         out_points_path = file.path(resdir, 
                                     paste0('sites_points_lake',
-                                           format(Sys.Date(), "%Y%m%d"),
+                                           format(Sys.time(), "%Y%m%d%H%M"),
                                            ".gpkg")
         ),
         columns_to_include = c("FW_ID", "Ecosystem", "Country_ISO", "Country",
