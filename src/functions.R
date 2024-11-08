@@ -429,3 +429,24 @@ snap_lake_sites <- function(in_sites_path,
     geom_path = out_snapped_sites_path #Path to geopackage containing site points with attribute data
   ))
 }
+
+#------ extract data from raster -----------------------------------------------
+extract_inner <- function(in_sites_path, in_rast_path) {
+  pts <- vect(in_sites_path) #read site points
+  pts_extract <- terra::extract(rast(in_rast_path), pts) #read raster and extract data
+  pts_extract[, 'FW_ID'] <- values(pts)[, 'FW_ID']
+  return(as.data.table(pts_extract[, -1]))
+}
+extract_raster_to_sites <- function(in_sites_path,
+                                    in_rast_path) {
+  if (length(in_sites_path) > 1) {
+    pts_extract_bind <- lapply(in_sites_path, function(x) {
+      return(extract_inner(x, in_rast_path))
+    }) %>%
+      rbindlist
+      
+  } else {
+    pts_extract_bind <- extract_inner(in_sites_path, in_rast_path) 
+  }
+  return(as.data.frame(pts_extract_bind))
+}

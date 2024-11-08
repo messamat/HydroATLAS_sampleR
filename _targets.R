@@ -217,16 +217,9 @@ list(
   tar_target(
     sites_gai,
     #For both river and lake sites
-    lapply(c(river_sites_snapped$geom_path, lake_sites_snapped$geom_path),
-           function(pts_path) {
-             pts <- vect(pts_path) #read site points
-             pts_extract <- terra::extract(rast(gai_path), pts) #read raster and extract data
-             pts_extract[, 'FW_ID'] <- values(pts)[, 'FW_ID'] #Re-assign unique IDs to table
-
-             return(as.data.table(pts_extract[, -1]))
-           }
-    ) %>% rbindlist %>%
-      as.data.frame
+    extract_raster_to_sites(in_sites_path = c(river_sites_snapped$geom_path, 
+                                              lake_sites_snapped$geom_path),
+                            in_rast_path = gai_path)
   )
   ,
 
