@@ -195,7 +195,11 @@ intersect_sites_basins <- function (in_sites_path,
                                     in_basins4_pathlist,
                                     in_basins12_pathlist) {
   #Import sites as vector
-  sitesp <- terra::vect(in_sites_path)
+  if (length(in_sites_path) > 1) {
+    sitesp <- do.call(rbind, lapply(in_sites_path, vect))
+  } else {
+    sitesp <- terra::vect(in_sites_path)
+  }
 
   #Read HydroBASINS level 4 and get PFAF_ID for each site
   # (see technical doc; it's a hierarchical ID system for nested basins)
@@ -326,8 +330,13 @@ snap_river_sites <- function(in_sites_path,
   
   if (!file.exists(out_snapped_sites_path) | overwrite) {
     #Iterate over every basin where there is a site
-    sites <- vect(in_sites_path) %>%
-      merge(in_sites_pfafid, by.x='FW_ID', by.y='FW_ID')
+    if (length(in_sites_path) > 1) {
+      sites <- do.call(rbind, lapply(in_sites_path, vect)) 
+    } else {
+      sites <- terra::vect(in_sites_path)
+    }
+    
+    sites <- merge(sites, in_sites_pfafid, by.x='FW_ID', by.y='FW_ID')
     
     sites_snapped <- lapply(unique(sites[!is.na(sites$PFAF_ID),]$PFAF_ID), 
                             function(in_pfafid) {
@@ -381,7 +390,11 @@ snap_lake_sites <- function(in_sites_path,
   
   if (!file.exists(out_snapped_sites_path) | overwrite) {
     #Iterate over every basin where there is a site
-    sites <- vect(in_sites_path) 
+    if (length(in_sites_path) > 1) {
+      sites <- do.call(rbind, lapply(in_sites_path, vect)) 
+    } else {
+      sites <- terra::vect(in_sites_path)
+    }
     
     #LakeATLAS is divided in two zones (east and west), so iterate over these
     sites_snapped <- lapply(in_lakeatlas_pathlist, function(in_lakeatlas_path) {
